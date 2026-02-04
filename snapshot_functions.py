@@ -83,7 +83,7 @@ def rasterize_icecharts_to_EASE(
 
     assert hemis in ["N", "S"]
     if extent_window is None:
-        extent_window = 3_000_000 if hemis == "N" else 3_000_000
+        extent_window = 3_000_000 if hemis == "N" else 4_000_000
 
     # Grid definition (EASE2 Polar)
     EXTENT = 9_000_000
@@ -761,10 +761,14 @@ def read_AMSR_day_to_EASE2(date, hemis):
             if len(filenames) == 0:
                 filenames = glob.glob(f'/mnt/spaces/Radiometers/AMSR2/EASE2_25km/{date[:4]}/'
                                 f'NSIDC0630_*EASE2_{hemis}25km_GCOMW1_AMSR2_{read_frequency}_{date}*v2.0.nc')
-                AMSR_dict[f'AMSR2_TB{name_frequency}'] = np.full((240, 240), np.nan)
+                size = 240 if hemis == 'N' else 320
+                AMSR_dict[f'AMSR2_TB{name_frequency}'] = np.full((size, size), np.nan)
                 continue
             with NetCDFFile(filenames[0]) as data:
-                TB = data.variables['TB'][0,240:480,240:480]
+                if hemis == 'N':
+                    TB = data.variables['TB'][0,240:480,240:480]  # 3000km
+                else:
+                    TB = data.variables['TB'][0,200:520,200:520]  # 4000km 
                 TB = np.ma.filled(TB, np.nan)  
             
             AMSR_dict[f'AMSR2_TB{name_frequency}_{ME}'] = TB
@@ -784,8 +788,10 @@ def read_ERA5_day_to_EASE2(DATE, hemis, target_res=25000):
     path_base = Path("/mnt/spaces/Models/ERA5/incoming/") / f"{DATE[:4]}/"
     if hemis == 'N':
         pattern = f"era5_{DATE}_250_1hr_arc.nc"
+        extent = 3000000 
     elif hemis == 'S':
         pattern = f"era5_{DATE}_250_1hr_ant.nc"
+        extent = 4000000 
     # load data
     file = natsort.natsorted(glob.glob(str(path_base / pattern)))[0]
     with NetCDFFile(file) as data:
@@ -806,7 +812,6 @@ def read_ERA5_day_to_EASE2(DATE, hemis, target_res=25000):
     # Create coordinate arrays for EASE-Grid 2.0
     # 3000000m extent means -3000000 to +3000000 in both x and y
     # 25km resolution means 240 pixels (6000000 / 25000)
-    extent = 3000000
     resolution = 25000
     size = int(2 * extent / resolution)
     x = np.linspace(-extent, extent, size)
@@ -867,14 +872,15 @@ def read_ASCAT_day_to_EASE2(DATE, hemis, target_res=25000):
     path_base = Path("/mnt/raid01/Scatterometers/ASCAT/nrt_products") / f"{DATE[:4]}/"
     if hemis == 'N':
         pattern = f"ASCAT_NRT_{DATE}_N*.nc"
+        extent = 3000000
     elif hemis == 'S':
         pattern = f"ASCAT_NRT_{DATE}_S*.nc"
+        extent = 4000000
     
     files = natsort.natsorted(glob.glob(str(path_base / pattern)))
     if not files:
         print(f"No ASCAT data available for {DATE}-{hemis}")
         # Return empty dict with NaN arrays for EASE2 grid
-        extent = 3000000
         size = int(2 * extent / target_res)
         ease2_shape = (size, size)
         return {'ascat_S0': np.full(ease2_shape, np.nan)}
@@ -910,7 +916,6 @@ def read_ASCAT_day_to_EASE2(DATE, hemis, target_res=25000):
         ease2_proj = '+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs'
     
     # Create EASE-Grid 2.0 geometry
-    extent = 3000000
     if hemis=="N":
         Projection=Proj(CRS.from_epsg(6931)) 
         xx,yy=np.mgrid[-extent:extent:target_res,
