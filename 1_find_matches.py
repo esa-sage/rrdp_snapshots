@@ -14,10 +14,10 @@ def read_icechart_to_25km(date, dataset, filenames, hemis):
     for filename in filenames:
         gdf = gpd.read_file(filename)
         # this reduces the resolution of the shapefiles to 5 km for faster plotting 
-        if dataset == 'AARI' and int(date[:4]) < 2020:
-            gdf["geometry"] = gdf["geometry"].simplify(tolerance=0.05, preserve_topology=True)
-        else:
-            gdf["geometry"] = gdf["geometry"].simplify(tolerance=5000, preserve_topology=True)
+        #if dataset == 'AARI' and int(date[:4]) < 2020:
+        #    gdf["geometry"] = gdf["geometry"].simplify(tolerance=0.05, preserve_topology=True)
+        #else:
+        #    gdf["geometry"] = gdf["geometry"].simplify(tolerance=5000, preserve_topology=True)
         gdf_list.append(gdf)
     # put the different files of same days into one list
     gdf = pd.concat(gdf_list, ignore_index=True)
@@ -27,6 +27,10 @@ def read_icechart_to_25km(date, dataset, filenames, hemis):
     gdf = convert_egg_to_SoD(gdf)
     # combine icetypes A, B and C into one prominent icetype column, use only if at least 90%
     gdf = add_prominent_icetype_to_gdf(gdf)
+    # check if add_prominent_icetype_to_gdf returned None
+    if gdf is None:
+        print(f"{dataset} data for {date} has no valid ice types, excluding dataset")
+        return None
     # rasterize to 25 km EASE grid
     data_25km = rasterize_icecharts_to_EASE(gdf, hemis)
     if data_25km is None: # this happens e.g. if there is only unknown ice types given in the gdf
@@ -347,18 +351,28 @@ def get_data_dict(date, datasets, hemis):
     
     for dataset, filenames in datasets.items():
         print(f"Reading {dataset} data from files: {filenames}")
-        if dataset in ['AARI','CIS','NIC']:
-            data_25km = read_icechart_to_25km(date, dataset, filenames, hemis)
-        elif dataset == 'DMI':
-            data_25km = read_DMI_icechart_to_25km(filenames, hemis)
-        elif dataset == 'autoDMI':
-            data_25km = read_autoDMI_to_25km(filenames, hemis)    
-        elif dataset == 'S1':
-            data_25km = read_S1_to_25km(filenames, hemis)
-        else:
-            print(f"Dataset {dataset} not recognized, skipping...")
-        if data_25km is not None:
-            data_dict_25km[dataset] = data_25km
+        try:  # try-except to catch any errors
+            if dataset in ['AARI','CIS','NIC']:
+                data_25km = read_icechart_to_25km(date, dataset, filenames, hemis)
+            elif dataset == 'DMI':
+                data_25km = read_DMI_icechart_to_25km(filenames, hemis)
+            elif dataset == 'autoDMI':
+                data_25km = read_autoDMI_to_25km(filenames, hemis)    
+            elif dataset == 'S1':
+                data_25km = read_S1_to_25km(filenames, hemis)
+            else:
+                print(f"Dataset {dataset} not recognized, skipping...")
+                data_25km = None
+                
+            # only add to dict if data is valid
+            if data_25km is not None:
+                data_dict_25km[dataset] = data_25km
+            else:
+                print(f"{dataset} returned no valid data for {date}, excluding from processing")
+                
+        except Exception as e:
+            print(f"Error processing {dataset} for {date}: {e}")
+            continue
     
     return data_dict_25km
 
@@ -764,6 +778,15 @@ def main(start_date, end_date, hemis, outpath):
             
         # read datasets of the day directly into 25 km EASE grid
         data_dict_25km = get_data_dict(date, datasets, hemis)
+        
+        # check if there are at least 2 valid datasets after processing
+        if len(data_dict_25km) < 2:
+            print(f"### After filtering, only {len(data_dict_25km)} valid dataset(s) for {date}: {list(data_dict_25km.keys())}")
+            print(f"### Need at least 2 datasets for matching, skipping day...")
+            continue
+        
+        print(f"Proceeding with {len(data_dict_25km)} valid datasets: {list(data_dict_25km.keys())}")
+        
         
         # create new array with matches of dominant icetypes
         match_array = get_match_array(data_dict_25km)

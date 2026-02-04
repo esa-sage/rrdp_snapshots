@@ -468,6 +468,13 @@ def add_prominent_icetype_to_gdf(gdf):
     gdf['syi_conc'] = SYI_conc
     gdf['fyi_conc'] = FYI_conc
     gdf['yi_conc'] = YI_conc
+    
+    # check if there is finite data to use in the gdf
+    valid_ice_types = np.array(SOD_out)
+    has_valid_ice = np.any((valid_ice_types >= 1) & (valid_ice_types <= 4))
+    
+    if not has_valid_ice:
+        return None
 
     return gdf
 
