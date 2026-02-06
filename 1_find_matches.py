@@ -754,7 +754,7 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
     ds.to_netcdf(output_path, encoding=encoding, unlimited_dims=['time'])
     print(f"Saved to {output_path}")
 
-def main(start_date, end_date, hemis, outpath):
+def main(start_date, end_date, hemis, outpath, vfv):
     
     # Generate list of dates to process
     dates = get_date_range_in_str(start_date, end_date)
@@ -762,7 +762,7 @@ def main(start_date, end_date, hemis, outpath):
 
     for date in dates:
 
-        day_filename = os.path.join(outpath, f"{date}_{hemis}.nc")
+        day_filename = os.path.join(outpath, f"{date}_{hemis}_{vfv}.nc")
         # Check if date is already processed
         if os.path.exists(day_filename):
             print(f"### Date {date} already processed, skipping.")
@@ -842,6 +842,7 @@ if __name__ == "__main__":
     parser.add_argument("end_date", help="end date of sarching period in YYYYMMDD format")
     parser.add_argument("hemis", help="hemisphere, either 'N' or 'S'")
     parser.add_argument("outpath", help="Path to the output netcdf files")
+    parser.add_argument("vfv", help="dataset version and file version in format v**_fv**")
     args = parser.parse_args()
     
-    main(args.start_date, args.end_date, args.hemis, args.outpath)
+    main(args.start_date, args.end_date, args.hemis, args.outpath, args.vfv)

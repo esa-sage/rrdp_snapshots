@@ -400,19 +400,13 @@ def autoDMI_S1_to_EASE(
 def add_prominent_icetype_to_gdf(gdf):
     """
     For each polygon in the GeoDataFrame, determine the most prominent ice type
-    (the one with the highest combined concentration among A, B, C) and add two new columns:
+    (the one with the highest combined concentration among A, B, C) and add columns:
     - 'SOD_out': stage of development of the most prominent ice type
     - 'SIC_out': concentration of the most prominent ice type
-
-    Parameters
-    ----------
-    gdf : geopandas.GeoDataFrame
-        Input GeoDataFrame with columns 'SOD_A', 'SOD_B', 'SOD_C', 'SIC_A', 'SIC_B', 'SIC_C'
-
-    Returns
-    -------
-    gdf : geopandas.GeoDataFrame
-        GeoDataFrame with added columns 'SOD_out' and 'SIC_out'
+    - 'myi_conc', 'syi_conc', 'fyi_conc', 'yi_conc': concentrations (0-1 range)
+    
+    Returns GeoDataFrame with only valid polygons (ice or water), excluding invalid/no-data polygons.
+    Returns None if no valid data exists.
     """
     import numpy as np
 
@@ -452,9 +446,15 @@ def add_prominent_icetype_to_gdf(gdf):
         valid_ice = (sods != -77) & (sods != 0)
         sods_ice_valid = sods[valid_ice]
         sics_ice_valid = sics[valid_ice]
+        
+        # when there are no valid ice types, check if it's open water or invalid/no data
         if len(sods_ice_valid) == 0:
-            SOD_out.append(0)
-            SIC_out.append(0)
+            if row['SIC_T'] == 0 or np.any(sods == 0):
+                SOD_out.append(0)  # open water
+                SIC_out.append(0)
+            else:
+                SOD_out.append(-77)  # Invalid/no data
+                SIC_out.append(-77)
         else:
             unique_types = np.unique(sods_ice_valid)
             sums = [sics_ice_valid[sods_ice_valid == t].sum() for t in unique_types]
@@ -469,14 +469,17 @@ def add_prominent_icetype_to_gdf(gdf):
     gdf['fyi_conc'] = FYI_conc
     gdf['yi_conc'] = YI_conc
     
-    # check if there is finite data to use in the gdf
-    valid_ice_types = np.array(SOD_out)
+    # Filter out invalid polygons (SOD_out = -77)
+    gdf_valid = gdf[gdf['SOD_out'] != -77].copy()
+    
+    # Check if there is any valid ice type data (types 1-4)
+    valid_ice_types = gdf_valid['SOD_out'].values
     has_valid_ice = np.any((valid_ice_types >= 1) & (valid_ice_types <= 4))
     
     if not has_valid_ice:
         return None
 
-    return gdf
+    return gdf_valid
 
 def convert_egg_to_SoD(gdf):
 
