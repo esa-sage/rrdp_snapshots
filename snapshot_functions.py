@@ -431,16 +431,23 @@ def add_prominent_icetype_to_gdf(gdf):
         sods_all_valid = sods[valid_all]
         sics_all_valid = sics[valid_all]
 
-        # Concentration for each type (sum, not fraction)
-        myi_conc = sics_all_valid[(sods_all_valid == 3) | (sods_all_valid == 4)].sum()
-        syi_conc = sics_all_valid[sods_all_valid == 3].sum()
-        fyi_conc = sics_all_valid[sods_all_valid == 2].sum()
-        yi_conc  = sics_all_valid[sods_all_valid == 1].sum()
-
-        MYI_conc.append(myi_conc/100.0)
-        SYI_conc.append(syi_conc/100.0)
-        FYI_conc.append(fyi_conc/100.0)
-        YI_conc.append(yi_conc/100.0)
+        if len(sods_all_valid) == 0:
+            # No valid data at all
+            MYI_conc.append(np.nan)
+            SYI_conc.append(np.nan)
+            FYI_conc.append(np.nan)
+            YI_conc.append(np.nan)
+        else:
+            # Calculate concentrations from valid data
+            myi_conc = sics_all_valid[(sods_all_valid == 3) | (sods_all_valid == 4)].sum()
+            syi_conc = sics_all_valid[sods_all_valid == 3].sum()
+            fyi_conc = sics_all_valid[sods_all_valid == 2].sum()
+            yi_conc  = sics_all_valid[sods_all_valid == 1].sum()
+            
+            MYI_conc.append(myi_conc/100.0)
+            SYI_conc.append(syi_conc/100.0)
+            FYI_conc.append(fyi_conc/100.0)
+            YI_conc.append(yi_conc/100.0)
 
         # Dominant ice type logic 
         valid_ice = (sods != -77) & (sods != 0)
