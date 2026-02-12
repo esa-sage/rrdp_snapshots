@@ -83,7 +83,7 @@ def rasterize_icecharts_to_EASE(
 
     assert hemis in ["N", "S"]
     if extent_window is None:
-        extent_window = 3_000_000 if hemis == "N" else 4_000_000
+        extent_window = 3_000_000 if hemis == "N" else 4_200_000
 
     # Grid definition (EASE2 Polar)
     EXTENT = 9_000_000
@@ -778,14 +778,14 @@ def read_AMSR_day_to_EASE2(date, hemis):
             if len(filenames) == 0:
                 filenames = glob.glob(f'/mnt/spaces/Radiometers/AMSR2/EASE2_25km/{date[:4]}/'
                                 f'NSIDC0630_*EASE2_{hemis}25km_GCOMW1_AMSR2_{read_frequency}_{date}*v2.0.nc')
-                size = 240 if hemis == 'N' else 320
+                size = 240 if hemis == 'N' else 336
                 AMSR_dict[f'AMSR2_TB{name_frequency}'] = np.full((size, size), np.nan)
                 continue
             with NetCDFFile(filenames[0]) as data:
                 if hemis == 'N':
                     TB = data.variables['TB'][0,240:480,240:480]  # 3000km
                 else:
-                    TB = data.variables['TB'][0,200:520,200:520]  # 4000km 
+                    TB = data.variables['TB'][0,192:528,192:528]  # 4200km 
                 TB = np.ma.filled(TB, np.nan)  
             
             AMSR_dict[f'AMSR2_TB{name_frequency}_{ME}'] = TB
@@ -808,7 +808,7 @@ def read_ERA5_day_to_EASE2(DATE, hemis, target_res=25000):
         extent = 3000000 
     elif hemis == 'S':
         pattern = f"era5_{DATE}_250_1hr_ant.nc"
-        extent = 4000000 
+        extent = 4200000 
     # load data
     file = natsort.natsorted(glob.glob(str(path_base / pattern)))[0]
     with NetCDFFile(file) as data:
@@ -892,7 +892,7 @@ def read_ASCAT_day_to_EASE2(DATE, hemis, target_res=25000):
         extent = 3000000
     elif hemis == 'S':
         pattern = f"ASCAT_NRT_{DATE}_S*.nc"
-        extent = 4000000
+        extent = 4200000
     
     files = natsort.natsorted(glob.glob(str(path_base / pattern)))
     if not files:

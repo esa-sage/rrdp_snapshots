@@ -516,7 +516,7 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
         extent = 3000000
         projection = '+proj=laea +lat_0=90 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'
     else:
-        extent = 4000000
+        extent = 4200000
         projection = '+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'
     
     size = int(2 * extent / res)
