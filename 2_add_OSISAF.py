@@ -8,7 +8,7 @@ import pyresample as pr
 from tqdm import tqdm
 from snapshot_functions import *
 
-func_path = os.path.abspath(os.path.join('..','..','collab','rrdp-ity-algos'))
+func_path = os.path.abspath(os.path.join('..','rrdp_algos/rrdp-ity-algos'))
 print(func_path)
 if func_path not in sys.path:
     sys.path.append(func_path)
@@ -36,7 +36,7 @@ def main():
 
     # find all the interesting RRDP files
     rrdp_patt = os.path.join(args.input_dir,'*.nc')
-    rrdp_files = glob(rrdp_patt)
+    rrdp_files = sorted(glob(rrdp_patt))
     if len(rrdp_files) == 0:
         print(f"Error: Found no RRDP files in '{args.input_dir}'.")
         sys.exit(1)
@@ -62,7 +62,9 @@ def main():
         ds = xr.open_dataset(rrdp_file_in)
         
         # Get the date from the filename (can later take it from the 'time' coordinate variable)
-        dtstr, area = os.path.basename(rrdp_file_in).replace('.nc','').split('_')
+        #dtstr, area = os.path.basename(rrdp_file_in).replace('.nc','').split('_')
+        dtstr = ds.date
+        hemis = ds.hemisphere
         dt = datetime.strptime(dtstr,'%Y%m%d').date()
         # Load grid area definition
         trg_adef, _ = pr.utils.load_cf_area(rrdp_file_in)
@@ -70,7 +72,9 @@ def main():
         # Access OSI SAF SIC, remap it to the area of the RRDP snapshot
         v_n = 'OSISAF_sic'
         if v_n not in ds.variables:
-            sic, sic_url, sic_source = osi_sic.remap_sic(dt, area.lower()+'h', trg_adef)
+            if args.verbose:
+                print(f'##### adding OSISAF_sic to file')
+            sic, sic_url, sic_source = osi_sic.remap_sic(dt, hemis.lower()+'h', trg_adef)
             v_da = xr.DataArray(sic[None,:].astype(np.float32), dims=('time', 'xc', 'yc'), name=v_n,
                     attrs={
                     'standard_name': 'sea_ice_area_fraction', 'cell_methods': 'area:mean where sea',
