@@ -555,17 +555,13 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
         'plus dominant ice types, their concentration and the MYI concentration of the single datasets.'
         'AMSR brightness temperatures and ERA5 variables are added.'
     )
-    #ds.attrs['source'] = 'Sentinel-1 SAR, NIC ice charts, CIS ice charts, DMI ice charts, AARI ice charts, AMSR2 brightness temperatures, ERA5 reanalysis'
-    #ds.attrs['institution'] = 'Your Institution Name'
-    #ds.attrs['creator_name'] = 'Your Name'
-    #ds.attrs['creator_email'] = 'your.email@domain.com'
     ds.attrs['date_created'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
     ds.attrs['date'] = date_str
     ds.attrs['hemisphere'] = hemis
     ds.attrs['resolution_m'] = res
     ds.attrs['projection'] = projection
     ds.attrs['datasets_included'] = ', '.join(used_datasets)
-    #ds.attrs['Conventions'] = 'CF-1.8'
+    #ds.attrs['Conventions'] 
     
     # ===== ICE TYPE CODE TABLE =====
     ds.attrs['ice_type_codes'] = '1=YI (Young Ice), 2=FYI (First-Year Ice), 3=SYI (Second-Year Ice), 4=MYI (Multi-Year Ice), -77=No Data'
