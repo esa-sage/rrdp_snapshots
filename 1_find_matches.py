@@ -519,9 +519,9 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
         extent = 4200000
         projection = '+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs'
     
-    size = int(2 * extent / res)
-    xc = np.linspace(-extent, extent, size)
-    yc = np.linspace(extent, -extent, size)
+    # Create clean grid coordinates aligned to resolution (like in snapshot_functions.py)
+    xc = np.arange(-extent, extent, res) + res/2.0
+    yc = np.arange(extent, -extent, -res) + (-res/2.0)
     
     # Build data_vars dictionary
     data_vars = {}
@@ -547,7 +547,7 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
     ds.time.encoding['units'] = 'days since 1970-01-01'
     ds.time.encoding['calendar'] = 'proleptic_gregorian'
     
-    # ===== GLOBAL ATTRIBUTES =====
+    # ===== GLOBAL ATTRIBUTES (CF-1.11 Compliant) =====
     ds.attrs['title'] = f'Round Robin Data Package for Sea Ice Types'
     ds.attrs['summary'] = (
         'Multi-source sea ice type classification product gridded on 25 km EASE2 grid.'
@@ -561,7 +561,7 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
     ds.attrs['resolution_m'] = res
     ds.attrs['projection'] = projection
     ds.attrs['datasets_included'] = ', '.join(used_datasets)
-    #ds.attrs['Conventions'] 
+    ds.attrs['Conventions'] = 'CF-1.8'
     
     # ===== ICE TYPE CODE TABLE =====
     ds.attrs['ice_type_codes'] = '1=YI (Young Ice), 2=FYI (First-Year Ice), 3=SYI (Second-Year Ice), 4=MYI (Multi-Year Ice), -77=No Data'
@@ -589,12 +589,14 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
     
     # Ice type match variables
     if 'icetype_matches' in ds:
+        # Use the variable's actual dtype for flag_values
+        var_dtype = ds['icetype_matches'].dtype
         ds['icetype_matches'].attrs = {
             'long_name': 'Dominant ice type where all datasets agree on ice type and its concentration >=80%',
             'units': '1',
-            'flag_values': np.array([1, 2, 3, 4], dtype=np.int16),
+            'flag_values': np.array([1, 2, 3, 4], dtype=var_dtype),
             'flag_meanings': 'young_ice first_year_ice second_year_ice multi_year_ice',
-            'valid_range': np.array([1, 4], dtype=np.int16),
+            'valid_range': np.array([1, 4], dtype=var_dtype),
             #'_FillValue': np.int16(-77),
             'grid_mapping': 'crs'
         }
@@ -613,13 +615,15 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
     datasets = ['S1', 'NIC', 'CIS', 'DMI', 'AARI', 'autoDMI']
     for dataset in datasets:
         if f'{dataset}_dom_icetype' in ds:
+            # Use the variable's actual dtype for flag_values
+            var_dtype = ds[f'{dataset}_dom_icetype'].dtype
             ds[f'{dataset}_dom_icetype'].attrs = {
                 'long_name': f'{dataset} dominant ice type',
                 'source': dataset,
                 'units': '1',
-                'flag_values': np.array([1, 2, 3, 4], dtype=np.int16),
+                'flag_values': np.array([1, 2, 3, 4], dtype=var_dtype),
                 'flag_meanings': 'young_ice first_year_ice second_year_ice multi_year_ice',
-                'valid_range': np.array([1, 4], dtype=np.int16),
+                'valid_range': np.array([1, 4], dtype=var_dtype),
                 #'_FillValue': np.int16(-77),
                 'grid_mapping': 'crs'
             }
@@ -739,7 +743,11 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
         # Set _FillValue based on dtype
         if ds[var].dtype in [np.int8, np.int16, np.int32, np.int64]:
             var_encoding['dtype'] = ds[var].dtype
-            var_encoding['_FillValue'] = np.int16(-77)  # For integer ice type variables
+            # Use same dtype for _FillValue as the variable
+            if ds[var].dtype == np.int8:
+                var_encoding['_FillValue'] = np.int8(-77)
+            else:
+                var_encoding['_FillValue'] = np.int16(-77)
         else:
             # For float variables (concentrations, TB, ERA5)
             var_encoding['dtype'] = np.float32

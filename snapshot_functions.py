@@ -776,10 +776,8 @@ def read_AMSR_day_to_EASE2(date, hemis):
             filenames = glob.glob(f'/mnt/spaces/Radiometers/AMSR2/EASE2_25km/{date[:4]}/'
                                 f'NSIDC0630_*EASE2_{hemis}25km_GCOMW1_AMSR2_{ME}_{read_frequency}_{date}*v2.0.nc')
             if len(filenames) == 0:
-                filenames = glob.glob(f'/mnt/spaces/Radiometers/AMSR2/EASE2_25km/{date[:4]}/'
-                                f'NSIDC0630_*EASE2_{hemis}25km_GCOMW1_AMSR2_{read_frequency}_{date}*v2.0.nc')
                 size = 240 if hemis == 'N' else 336
-                AMSR_dict[f'AMSR2_TB{name_frequency}'] = np.full((size, size), np.nan)
+                AMSR_dict[f'AMSR2_TB{name_frequency}_{ME}'] = np.full((size, size), np.nan)
                 continue
             with NetCDFFile(filenames[0]) as data:
                 if hemis == 'N':
@@ -826,13 +824,11 @@ def read_ERA5_day_to_EASE2(DATE, hemis, target_res=25000):
     else:
         ease2_proj = '+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs'
 
-    # Create coordinate arrays for EASE-Grid 2.0
-    # 3000000m extent means -3000000 to +3000000 in both x and y
-    # 25km resolution means 240 pixels (6000000 / 25000)
+    # Create coordinate arrays for EASE-Grid 2.0 with clean grid (consistent with other functions)
+    # Use pixel-centered coordinates that are exact multiples of resolution/2
     resolution = 25000
-    size = int(2 * extent / resolution)
-    x = np.linspace(-extent, extent, size)
-    y = np.linspace(extent, -extent, size)  # Note: y decreases (typical for images)
+    x = np.arange(-extent, extent, resolution) + resolution/2.0
+    y = np.arange(extent, -extent, -resolution) + (-resolution/2.0)
     xx, yy = np.meshgrid(x, y)
     # Create EASE-Grid 2.0 geometry
     ease2_area = geometry.AreaDefinition('ease2_north', 'EASE-Grid 2.0 North', 'ease2_north',
@@ -900,7 +896,7 @@ def read_ASCAT_day_to_EASE2(DATE, hemis, target_res=25000):
         # Return empty dict with NaN arrays for EASE2 grid
         size = int(2 * extent / target_res)
         ease2_shape = (size, size)
-        return {'ascat_S0': np.full(ease2_shape, np.nan)}
+        return {'ASCAT_S0': np.full(ease2_shape, np.nan)}
     
     # Load ASCAT data
     with NetCDFFile(files[0]) as data:
@@ -932,15 +928,17 @@ def read_ASCAT_day_to_EASE2(DATE, hemis, target_res=25000):
     else:
         ease2_proj = '+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs'
     
-    # Create EASE-Grid 2.0 geometry
+    # Create EASE-Grid 2.0 geometry with clean grid (consistent with other functions)
     if hemis=="N":
-        Projection=Proj(CRS.from_epsg(6931)) 
-        xx,yy=np.mgrid[-extent:extent:target_res,
-                    -extent:extent:target_res]
+        Projection=Proj(CRS.from_epsg(6931))
+        x = np.arange(-extent, extent, target_res) + target_res/2.0
+        y = np.arange(extent, -extent, -target_res) + (-target_res/2.0)
+        xx, yy = np.meshgrid(x, y)
     else:
-        Projection=Proj(CRS.from_epsg(6932)) 
-        xx,yy=np.mgrid[-extent:extent:target_res,
-                    -extent:extent:target_res]
+        Projection=Proj(CRS.from_epsg(6932))
+        x = np.arange(-extent, extent, target_res) + target_res/2.0
+        y = np.arange(extent, -extent, -target_res) + (-target_res/2.0)
+        xx, yy = np.meshgrid(x, y)
     
     ease2_area = geometry.AreaDefinition(
         f'ease2_{hemis.lower()}', 
