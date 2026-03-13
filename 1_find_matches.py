@@ -784,21 +784,16 @@ def main(start_date, end_date, hemis, outpath, vfv):
         data_dict_25km = get_data_dict(date, datasets, hemis)
         
         # check if there are at least 2 valid datasets after processing
-        if len(data_dict_25km) < 2:
+        if len(data_dict_25km) >= 2:
+            # create new array with matches of dominant icetypes
+            match_array = get_match_array(data_dict_25km)
+            # use myi concentration arrays to find matches within +- 10% myi concentration
+            match_conc = get_match_array_myi_concentration(data_dict_25km, threshold=0.2)
+            # set match_conc to nan if it is valid in the pure match_array
+            #match_conc[match_array != -77] = np.nan
+        else:
             print(f"### After filtering, only {len(data_dict_25km)} valid dataset(s) for {date}: {list(data_dict_25km.keys())}")
-            print(f"### Need at least 2 datasets for matching, skipping day...")
-            continue
-        
-        print(f"Proceeding with {len(data_dict_25km)} valid datasets: {list(data_dict_25km.keys())}")
-        
-        
-        # create new array with matches of dominant icetypes
-        match_array = get_match_array(data_dict_25km)
-        # use myi concentration arrays to find matches within +- 10% myi concentration
-        match_conc = get_match_array_myi_concentration(data_dict_25km, threshold=0.2)
-        # set match_conc to nan if it is valid in the pure match_array
-        #match_conc[match_array != -77] = np.nan
-        
+    
         # collect AMSR data for the day
         AMSR_dict = read_AMSR_day_to_EASE2(date, hemis)
         
