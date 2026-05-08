@@ -274,6 +274,27 @@ def DMI_icechart_to_EASE(xc, yc, raster_maps,
     myi_conc = np.clip(myi_conc, 0.0, 1.0)
     #myi_conc[open_water] = 0.0
     
+    # Calculate SYI concentration (relative to cell area)
+    syi_conc = np.full((ny_tgt, nx_tgt), np.nan, dtype=np.float32)
+    syi_conc[mask_has_pixels] = (
+        ice_type_weights_2d[3][mask_has_pixels] / expected_total_weight[mask_has_pixels]
+    ).astype(np.float32)
+    syi_conc = np.clip(syi_conc, 0.0, 1.0)
+    
+    # Calculate FYI concentration (relative to cell area)
+    fyi_conc = np.full((ny_tgt, nx_tgt), np.nan, dtype=np.float32)
+    fyi_conc[mask_has_pixels] = (
+        ice_type_weights_2d[2][mask_has_pixels] / expected_total_weight[mask_has_pixels]
+    ).astype(np.float32)
+    fyi_conc = np.clip(fyi_conc, 0.0, 1.0)
+    
+    # Calculate YI concentration (relative to cell area)
+    yi_conc = np.full((ny_tgt, nx_tgt), np.nan, dtype=np.float32)
+    yi_conc[mask_has_pixels] = (
+        ice_type_weights_2d[1][mask_has_pixels] / expected_total_weight[mask_has_pixels]
+    ).astype(np.float32)
+    yi_conc = np.clip(yi_conc, 0.0, 1.0)
+    
     # Calculate total concentration from sum of all ice type concentrations
     total_ice_weight = (
         ice_type_weights_2d[1] +  # YI
@@ -293,13 +314,27 @@ def DMI_icechart_to_EASE(xc, yc, raster_maps,
     dominant_icetype[~valid_mask] = -77
     dom_icetype_conc[~valid_mask] = np.nan
     myi_conc[~valid_mask] = np.nan
+    syi_conc[~valid_mask] = np.nan
+    fyi_conc[~valid_mask] = np.nan
+    yi_conc[~valid_mask] = np.nan
     total_conc[~valid_mask] = np.nan
+    
+    # Set to NaN where total ice concentration < 1%
+    dominant_icetype[total_conc < 0.01] = -77
+    dom_icetype_conc[total_conc < 0.01] = np.nan
+    myi_conc[total_conc < 0.01] = np.nan
+    syi_conc[total_conc < 0.01] = np.nan
+    fyi_conc[total_conc < 0.01] = np.nan
+    yi_conc[total_conc < 0.01] = np.nan
     
     # Build output dictionary
     result = {
         'dom_icetype': dominant_icetype,
         'dom_icetype_conc': dom_icetype_conc,  
-        'myi_conc': myi_conc,                  
+        'myi_conc': myi_conc,
+        'syi_conc': syi_conc,
+        'fyi_conc': fyi_conc,
+        'yi_conc': yi_conc,
         'total_ice_conc': total_conc        
     }
 
@@ -649,6 +684,39 @@ def save_to_netcdf(data_dict, used_datasets, output_path, hemis='N', res=25000):
                 #'_FillValue': np.float32(np.nan),
                 'grid_mapping': 'crs'
             }
+        
+        if f'{dataset}_syi_conc' in ds:
+            ds[f'{dataset}_syi_conc'].attrs = {
+                'long_name': f'{dataset} second-year ice concentration',
+                'source': dataset,
+                'units': '1',
+                'valid_min': np.float32(0.0),
+                'valid_max': np.float32(1.0),
+                #'_FillValue': np.float32(np.nan),
+                'grid_mapping': 'crs'
+            }
+        
+        if f'{dataset}_fyi_conc' in ds:
+            ds[f'{dataset}_fyi_conc'].attrs = {
+                'long_name': f'{dataset} first-year ice concentration',
+                'source': dataset,
+                'units': '1',
+                'valid_min': np.float32(0.0),
+                'valid_max': np.float32(1.0),
+                #'_FillValue': np.float32(np.nan),
+                'grid_mapping': 'crs'
+            }
+        
+        if f'{dataset}_yi_conc' in ds:
+            ds[f'{dataset}_yi_conc'].attrs = {
+                'long_name': f'{dataset} young ice concentration',
+                'source': dataset,
+                'units': '1',
+                'valid_min': np.float32(0.0),
+                'valid_max': np.float32(1.0),
+                #'_FillValue': np.float32(np.nan),
+                'grid_mapping': 'crs'
+            }
             
         if f'{dataset}_total_ice_conc' in ds:
             ds[f'{dataset}_total_ice_conc'].attrs = {
@@ -765,25 +833,29 @@ def main(start_date, end_date, hemis, outpath, vfv):
     
 
     for date in dates:
-
-        day_filename = os.path.join(outpath, f"{date}_{hemis}_{vfv}.nc")
-        # Check if date is already processed
-        if os.path.exists(day_filename):
-            print(f"### Date {date} already processed, skipping.")
-            continue
         
         # check how many datasets are available for the day
         datasets = check_data_availability(date, hemis)
-        if len(datasets) < 2:
-            print(f"### Only {list(datasets.keys())} data available for {date}, skipping...")
+        num_reference_datasets = len(datasets)
+        
+        # Create filename with reference count appended
+        day_filename = os.path.join(outpath, f"{date}_{hemis}_{vfv}_r{num_reference_datasets}.nc")
+        
+        # Check if date is already processed
+        if os.path.exists(day_filename):
+            print(f"### Date {date} already processed (r{num_reference_datasets}), skipping.")
             continue
-        else:
-            print(f"### Processing date {date} with datasets: {list(datasets.keys())}")
+        
+        print(f"### Processing date {date} with {num_reference_datasets} reference dataset(s): {list(datasets.keys())}")
             
         # read datasets of the day directly into 25 km EASE grid
         data_dict_25km = get_data_dict(date, datasets, hemis)
         
-        # check if there are at least 2 valid datasets after processing
+        # Initialize match arrays
+        match_array = None
+        match_conc = None
+        
+        # check if there are at least 2 valid datasets after processing for matching
         if len(data_dict_25km) >= 2:
             # create new array with matches of dominant icetypes
             match_array = get_match_array(data_dict_25km)
@@ -791,8 +863,9 @@ def main(start_date, end_date, hemis, outpath, vfv):
             match_conc = get_match_array_myi_concentration(data_dict_25km, threshold=0.2)
             # set match_conc to nan if it is valid in the pure match_array
             #match_conc[match_array != -77] = np.nan
+            print(f"### Computed matches from {len(data_dict_25km)} valid dataset(s)")
         else:
-            print(f"### After filtering, only {len(data_dict_25km)} valid dataset(s) for {date}: {list(data_dict_25km.keys())}")
+            print(f"### Only {len(data_dict_25km)} valid dataset(s) for {date}: {list(data_dict_25km.keys())} - no matching performed")
     
         # collect AMSR data for the day
         AMSR_dict = read_AMSR_day_to_EASE2(date, hemis)
@@ -808,9 +881,13 @@ def main(start_date, end_date, hemis, outpath, vfv):
         # Combine all data into a single dictionary for saving
         combined_dict = {
             'date': date,  # Add date for metadata
-            'icetype_matches': match_array,
-            'myi_concentration_matches': match_conc
         }
+        
+        # Only add match arrays if they were computed (i.e., at least 2 datasets)
+        if match_array is not None:
+            combined_dict['icetype_matches'] = match_array
+        if match_conc is not None:
+            combined_dict['myi_concentration_matches'] = match_conc
         
         used_datasets = list(data_dict_25km.keys())
         # Add dataset-specific variables (flatten nested dict)
@@ -818,6 +895,13 @@ def main(start_date, end_date, hemis, outpath, vfv):
             combined_dict[f'{dataset_name}_dom_icetype'] = dataset_data['dom_icetype']
             combined_dict[f'{dataset_name}_dom_icetype_conc'] = dataset_data['dom_icetype_conc']
             combined_dict[f'{dataset_name}_myi_conc'] = dataset_data['myi_conc']
+            # Add individual ice type concentrations if they exist
+            if 'syi_conc' in dataset_data:
+                combined_dict[f'{dataset_name}_syi_conc'] = dataset_data['syi_conc']
+            if 'fyi_conc' in dataset_data:
+                combined_dict[f'{dataset_name}_fyi_conc'] = dataset_data['fyi_conc']
+            if 'yi_conc' in dataset_data:
+                combined_dict[f'{dataset_name}_yi_conc'] = dataset_data['yi_conc']
             # Only add total_ice_conc if it exists (ice charts only)
             if 'total_ice_conc' in dataset_data:
                 combined_dict[f'{dataset_name}_total_ice_conc'] = dataset_data['total_ice_conc']

@@ -244,6 +244,9 @@ def rasterize_icecharts_to_EASE(
     dominant_icetype[total_sic < 0.01] = -77
     dom_icetype_conc[total_sic < 0.01] = np.nan
     concentrations['myi'][total_sic < 0.01] = np.nan
+    concentrations['syi'][total_sic < 0.01] = np.nan
+    concentrations['fyi'][total_sic < 0.01] = np.nan
+    concentrations['yi'][total_sic < 0.01] = np.nan
 
     # ---------------------------------------------------------
     # 4) Build output dictionary
@@ -252,6 +255,9 @@ def rasterize_icecharts_to_EASE(
         'dom_icetype': dominant_icetype.astype(np.int8),
         'dom_icetype_conc': dom_icetype_conc,
         'myi_conc': concentrations['myi'],
+        'syi_conc': concentrations['syi'],
+        'fyi_conc': concentrations['fyi'],
+        'yi_conc': concentrations['yi'],
         'total_ice_conc': total_sic
     }
     
@@ -282,8 +288,11 @@ def autoDMI_S1_to_EASE(
     total_tgt_cells = nx_tgt * ny_tgt
 
     counts_flat = np.zeros((n_classes, total_tgt_cells), dtype=np.int64)    
-    myi_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)  # NEW: Track MYI pixels
-    ice_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)  # NEW: Track all ice pixels
+    myi_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)  # Track MYI pixels (class 4)
+    fyi_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)  # Track FYI pixels (class 2)
+    yi_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)   # Track YI pixels (class 1)
+    ice_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)  # Track all ice pixels
+    # Note: SYI (class 3) is not tracked as autoDMI/S1 remap class 3 to class 4 (MYI)
     
     transformer = Transformer.from_crs(src_crs, tgt_crs, always_xy=True)
 
@@ -338,14 +347,26 @@ def autoDMI_S1_to_EASE(
             blob = np.bincount(flat_idx[sel], minlength=total_tgt_cells)
             counts_flat[cls-1, :] += blob
             
+        # Count YI pixels (ice == 1)
+        yi_sel = (vals == 1)
+        if np.any(yi_sel):
+            yi_blob = np.bincount(flat_idx[yi_sel], minlength=total_tgt_cells)
+            yi_counts_flat += yi_blob
+            
+        # Count FYI pixels (ice == 2)
+        fyi_sel = (vals == 2)
+        if np.any(fyi_sel):
+            fyi_blob = np.bincount(flat_idx[fyi_sel], minlength=total_tgt_cells)
+            fyi_counts_flat += fyi_blob
+            
         # Count MYI pixels (ice == 4)
         myi_sel = (vals == 4)
         if np.any(myi_sel):
             myi_blob = np.bincount(flat_idx[myi_sel], minlength=total_tgt_cells)
             myi_counts_flat += myi_blob
         
-        # Count all ice pixels (ice types 1, 2, 4 - excluding 0 and invalid)
-        ice_sel = np.isin(vals, [1, 2, 4])
+        # Count all ice pixels (ice types 1, 2, 3, 4 - excluding 0 and invalid)
+        ice_sel = np.isin(vals, [1, 2, 3, 4])
         if np.any(ice_sel):
             ice_blob = np.bincount(flat_idx[ice_sel], minlength=total_tgt_cells)
             ice_counts_flat += ice_blob
@@ -353,8 +374,10 @@ def autoDMI_S1_to_EASE(
     # reshape
     counts = counts_flat.T.reshape(ny_tgt, nx_tgt, n_classes)
     total_counts = counts.sum(axis=2)
-    myi_counts = myi_counts_flat.reshape(ny_tgt, nx_tgt)  # NEW
-    ice_counts = ice_counts_flat.reshape(ny_tgt, nx_tgt)  # NEW
+    myi_counts = myi_counts_flat.reshape(ny_tgt, nx_tgt)
+    fyi_counts = fyi_counts_flat.reshape(ny_tgt, nx_tgt)
+    yi_counts = yi_counts_flat.reshape(ny_tgt, nx_tgt)
+    ice_counts = ice_counts_flat.reshape(ny_tgt, nx_tgt)
 
     # expected pixels per cell (25 km / 0.5 km = 50 pixels)
     expected_pixels = int((res / pixel_size) ** 2)
@@ -381,9 +404,24 @@ def autoDMI_S1_to_EASE(
     myi_concentration = np.zeros((ny_tgt, nx_tgt), dtype=np.float32)
     total_pixels_mask = total_counts > 0
     if np.any(total_pixels_mask):
-        myi_concentration[total_pixels_mask] = myi_counts[total_pixels_mask]/ expected_pixels
+        myi_concentration[total_pixels_mask] = myi_counts[total_pixels_mask] / expected_pixels
     # Clip to [0,1] and set invalid areas to NaN
     myi_concentration = np.clip(myi_concentration, 0.0, 1.0)
+    
+    # SYI concentration - set to NaN since autoDMI/S1 don't distinguish SYI (class 3 is remapped to MYI)
+    syi_concentration = np.full((ny_tgt, nx_tgt), np.nan, dtype=np.float32)
+    
+    # Calculate FYI concentration
+    fyi_concentration = np.zeros((ny_tgt, nx_tgt), dtype=np.float32)
+    if np.any(total_pixels_mask):
+        fyi_concentration[total_pixels_mask] = fyi_counts[total_pixels_mask] / expected_pixels
+    fyi_concentration = np.clip(fyi_concentration, 0.0, 1.0)
+    
+    # Calculate YI concentration
+    yi_concentration = np.zeros((ny_tgt, nx_tgt), dtype=np.float32)
+    if np.any(total_pixels_mask):
+        yi_concentration[total_pixels_mask] = yi_counts[total_pixels_mask] / expected_pixels
+    yi_concentration = np.clip(yi_concentration, 0.0, 1.0)
 
     # apply minimum-valid coverage rule
     valid_mask = (total_counts >= min_valid_pixels) #& (dominant_concentration >= 0.9)
@@ -393,9 +431,28 @@ def autoDMI_S1_to_EASE(
     dominant_class[~valid_mask] = -77
     concentration_cover[~valid_mask, :] = np.nan
     dominant_concentration[~valid_mask] = np.nan
-    myi_concentration[~valid_mask] = np.nan  
+    myi_concentration[~valid_mask] = np.nan
+    # syi_concentration already set to NaN for all cells
+    fyi_concentration[~valid_mask] = np.nan
+    yi_concentration[~valid_mask] = np.nan
+    
+    # Calculate total ice concentration and set to NaN where < 1%
+    total_ice_conc = myi_concentration + fyi_concentration + yi_concentration
+    dominant_class[total_ice_conc < 0.01] = -77
+    dominant_concentration[total_ice_conc < 0.01] = np.nan
+    myi_concentration[total_ice_conc < 0.01] = np.nan
+    # syi_concentration already all NaN, so skip
+    fyi_concentration[total_ice_conc < 0.01] = np.nan
+    yi_concentration[total_ice_conc < 0.01] = np.nan
 
-    return {'dom_icetype':dominant_class, 'dom_icetype_conc':dominant_concentration, 'myi_conc': myi_concentration}
+    return {
+        'dom_icetype': dominant_class, 
+        'dom_icetype_conc': dominant_concentration, 
+        'myi_conc': myi_concentration,
+        'syi_conc': syi_concentration,
+        'fyi_conc': fyi_concentration,
+        'yi_conc': yi_concentration
+    }
 
 def add_prominent_icetype_to_gdf(gdf):
     """
@@ -772,7 +829,7 @@ def read_AMSR_day_to_EASE2(date, hemis):
     read_frequencies = ['6.9H','6.9V','10.7H','10.7V','18H','18V','23V', '23H', '36V', '36H', '89V', '89H']
     name_frequencies = ['6.9H','6.9V','10.7H','10.7V','18.7H','18.7V','23.8V', '23.8H', '36.5V', '36.5H', '89V', '89H']
     for read_frequency, name_frequency in zip(read_frequencies,name_frequencies):
-        for ME in ['M','E']:
+        for ME in ['E']: # add 'M' to list if both overflights are desired - or exchange 'E' with 'M' to only read the other overflight
             filenames = glob.glob(f'/mnt/spaces/Radiometers/AMSR2/EASE2_25km/{date[:4]}/'
                                 f'NSIDC0630_*EASE2_{hemis}25km_GCOMW1_AMSR2_{ME}_{read_frequency}_{date}*v2.0.nc')
             if len(filenames) == 0:
