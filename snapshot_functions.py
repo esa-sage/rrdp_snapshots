@@ -287,11 +287,12 @@ def autoDMI_S1_to_EASE(
 
     total_tgt_cells = nx_tgt * ny_tgt
 
-    counts_flat = np.zeros((n_classes, total_tgt_cells), dtype=np.int64)    
-    myi_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)  # Track MYI pixels (class 4)
-    fyi_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)  # Track FYI pixels (class 2)
-    yi_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)   # Track YI pixels (class 1)
-    ice_counts_flat = np.zeros(total_tgt_cells, dtype=np.int64)  # Track all ice pixels
+    # Use float arrays since we'll be accumulating fractional (bilinear weighted) contributions
+    counts_flat = np.zeros((n_classes, total_tgt_cells), dtype=np.float64)    
+    myi_counts_flat = np.zeros(total_tgt_cells, dtype=np.float64)  # Track MYI pixels (class 4)
+    fyi_counts_flat = np.zeros(total_tgt_cells, dtype=np.float64)  # Track FYI pixels (class 2)
+    yi_counts_flat = np.zeros(total_tgt_cells, dtype=np.float64)   # Track YI pixels (class 1)
+    ice_counts_flat = np.zeros(total_tgt_cells, dtype=np.float64)  # Track all ice pixels
     # Note: SYI (class 3) is not tracked as autoDMI/S1 remap class 3 to class 4 (MYI)
     
     transformer = Transformer.from_crs(src_crs, tgt_crs, always_xy=True)
@@ -323,53 +324,85 @@ def autoDMI_S1_to_EASE(
         col_f = (bx_tgt - x_min) / res
         row_f = (y_max - by_tgt) / res
 
+        # Instead of hard binning with floor(), distribute each pixel to 4 surrounding cells
+        # This eliminates gridding artifacts by spreading contributions smoothly
         col_idx = np.floor(col_f).astype(np.int64)
         row_idx = np.floor(row_f).astype(np.int64)
+        
+        # Calculate fractional positions within cell (0 to 1)
+        dx = col_f - col_idx
+        dy = row_f - row_idx
 
+        # Filter for pixels that are within or near the target grid
+        # Need to check that all 4 surrounding cells are valid
         mask_in = (
-            (col_idx >= 0) & (col_idx < nx_tgt) &
-            (row_idx >= 0) & (row_idx < ny_tgt)
+            (col_idx >= 0) & (col_idx < nx_tgt - 1) &
+            (row_idx >= 0) & (row_idx < ny_tgt - 1)
         )
         if not np.any(mask_in):
             continue
 
         col_idx = col_idx[mask_in]
         row_idx = row_idx[mask_in]
-        vals    = vals[mask_in]
+        vals = vals[mask_in]
+        dx = dx[mask_in]
+        dy = dy[mask_in]
 
-        flat_idx = row_idx * nx_tgt + col_idx
+        # Calculate bilinear weights for 4 surrounding cells
+        # Top-left, top-right, bottom-left, bottom-right
+        w00 = (1 - dx) * (1 - dy)  # weight for cell at (row, col)
+        w10 = dx * (1 - dy)        # weight for cell at (row, col+1)
+        w01 = (1 - dx) * dy        # weight for cell at (row+1, col)
+        w11 = dx * dy              # weight for cell at (row+1, col+1)
 
-        # count per class
+        # Compute flat indices for all 4 surrounding cells
+        flat_idx_00 = row_idx * nx_tgt + col_idx
+        flat_idx_10 = row_idx * nx_tgt + (col_idx + 1)
+        flat_idx_01 = (row_idx + 1) * nx_tgt + col_idx
+        flat_idx_11 = (row_idx + 1) * nx_tgt + (col_idx + 1)
+
+        # Distribute counts with weights to all 4 cells for each class
         for cls in range(1, n_classes+1):
             sel = (vals == cls)
             if not np.any(sel):
                 continue
-            blob = np.bincount(flat_idx[sel], minlength=total_tgt_cells)
-            counts_flat[cls-1, :] += blob
+            # Add weighted contributions to each of the 4 surrounding cells
+            counts_flat[cls-1, :] += np.bincount(flat_idx_00[sel], weights=w00[sel], minlength=total_tgt_cells)
+            counts_flat[cls-1, :] += np.bincount(flat_idx_10[sel], weights=w10[sel], minlength=total_tgt_cells)
+            counts_flat[cls-1, :] += np.bincount(flat_idx_01[sel], weights=w01[sel], minlength=total_tgt_cells)
+            counts_flat[cls-1, :] += np.bincount(flat_idx_11[sel], weights=w11[sel], minlength=total_tgt_cells)
             
-        # Count YI pixels (ice == 1)
+        # Count YI pixels (ice == 1) with bilinear weights
         yi_sel = (vals == 1)
         if np.any(yi_sel):
-            yi_blob = np.bincount(flat_idx[yi_sel], minlength=total_tgt_cells)
-            yi_counts_flat += yi_blob
+            yi_counts_flat += np.bincount(flat_idx_00[yi_sel], weights=w00[yi_sel], minlength=total_tgt_cells)
+            yi_counts_flat += np.bincount(flat_idx_10[yi_sel], weights=w10[yi_sel], minlength=total_tgt_cells)
+            yi_counts_flat += np.bincount(flat_idx_01[yi_sel], weights=w01[yi_sel], minlength=total_tgt_cells)
+            yi_counts_flat += np.bincount(flat_idx_11[yi_sel], weights=w11[yi_sel], minlength=total_tgt_cells)
             
-        # Count FYI pixels (ice == 2)
+        # Count FYI pixels (ice == 2) with bilinear weights
         fyi_sel = (vals == 2)
         if np.any(fyi_sel):
-            fyi_blob = np.bincount(flat_idx[fyi_sel], minlength=total_tgt_cells)
-            fyi_counts_flat += fyi_blob
+            fyi_counts_flat += np.bincount(flat_idx_00[fyi_sel], weights=w00[fyi_sel], minlength=total_tgt_cells)
+            fyi_counts_flat += np.bincount(flat_idx_10[fyi_sel], weights=w10[fyi_sel], minlength=total_tgt_cells)
+            fyi_counts_flat += np.bincount(flat_idx_01[fyi_sel], weights=w01[fyi_sel], minlength=total_tgt_cells)
+            fyi_counts_flat += np.bincount(flat_idx_11[fyi_sel], weights=w11[fyi_sel], minlength=total_tgt_cells)
             
-        # Count MYI pixels (ice == 4)
+        # Count MYI pixels (ice == 4) with bilinear weights
         myi_sel = (vals == 4)
         if np.any(myi_sel):
-            myi_blob = np.bincount(flat_idx[myi_sel], minlength=total_tgt_cells)
-            myi_counts_flat += myi_blob
+            myi_counts_flat += np.bincount(flat_idx_00[myi_sel], weights=w00[myi_sel], minlength=total_tgt_cells)
+            myi_counts_flat += np.bincount(flat_idx_10[myi_sel], weights=w10[myi_sel], minlength=total_tgt_cells)
+            myi_counts_flat += np.bincount(flat_idx_01[myi_sel], weights=w01[myi_sel], minlength=total_tgt_cells)
+            myi_counts_flat += np.bincount(flat_idx_11[myi_sel], weights=w11[myi_sel], minlength=total_tgt_cells)
         
-        # Count all ice pixels (ice types 1, 2, 3, 4 - excluding 0 and invalid)
+        # Count all ice pixels (ice types 1, 2, 3, 4 - excluding 0 and invalid) with bilinear weights
         ice_sel = np.isin(vals, [1, 2, 3, 4])
         if np.any(ice_sel):
-            ice_blob = np.bincount(flat_idx[ice_sel], minlength=total_tgt_cells)
-            ice_counts_flat += ice_blob
+            ice_counts_flat += np.bincount(flat_idx_00[ice_sel], weights=w00[ice_sel], minlength=total_tgt_cells)
+            ice_counts_flat += np.bincount(flat_idx_10[ice_sel], weights=w10[ice_sel], minlength=total_tgt_cells)
+            ice_counts_flat += np.bincount(flat_idx_01[ice_sel], weights=w01[ice_sel], minlength=total_tgt_cells)
+            ice_counts_flat += np.bincount(flat_idx_11[ice_sel], weights=w11[ice_sel], minlength=total_tgt_cells)
 
     # reshape
     counts = counts_flat.T.reshape(ny_tgt, nx_tgt, n_classes)
@@ -836,12 +869,17 @@ def read_AMSR_day_to_EASE2(date, hemis):
                 size = 240 if hemis == 'N' else 336
                 AMSR_dict[f'AMSR2_TB{name_frequency}_{ME}'] = np.full((size, size), np.nan)
                 continue
-            with NetCDFFile(filenames[0]) as data:
-                if hemis == 'N':
-                    TB = data.variables['TB'][0,240:480,240:480]  # 3000km
-                else:
-                    TB = data.variables['TB'][0,192:528,192:528]  # 4200km 
-                TB = np.ma.filled(TB, np.nan)  
+            try:
+                with NetCDFFile(filenames[0]) as data:
+                    if hemis == 'N':
+                        TB = data.variables['TB'][0,240:480,240:480]  # 3000km
+                    else:
+                        TB = data.variables['TB'][0,192:528,192:528]  # 4200km 
+                    TB = np.ma.filled(TB, np.nan)  
+            except Exception as e:
+                print(f"Error reading {filenames[0]}: {e}")
+                size = 240 if hemis == 'N' else 336
+                TB = np.full((size, size), np.nan)
             
             AMSR_dict[f'AMSR2_TB{name_frequency}_{ME}'] = TB
             
@@ -867,13 +905,26 @@ def read_ERA5_day_to_EASE2(DATE, hemis, target_res=25000):
     # load data
     file = natsort.natsorted(glob.glob(str(path_base / pattern)))[0]
     with NetCDFFile(file) as data:
-        eratemp = data.variables['t2m'][:,:,:]
-        eraskintemp = data.variables['skt'][:,:,:]
-        eratcwv = data.variables['tcwv'][:,:,:]
-        eratclw = data.variables['tclw'][:,:,:]
-        eratciw = data.variables['tciw'][:,:,:]
-        erau10wind = data.variables['u10'][:,:,:]
-        erav10wind = data.variables['v10'][:,:,:]
+        # Check if variables have an 'expver' dimension (time, expver, lat, lon)
+        t2m_shape = data.variables['t2m'].shape
+        has_expver = len(t2m_shape) == 4
+
+        if has_expver:
+            eratemp     = data.variables['t2m'][:,0,:,:]
+            eraskintemp = data.variables['skt'][:,0,:,:]
+            eratcwv     = data.variables['tcwv'][:,0,:,:]
+            eratclw     = data.variables['tclw'][:,0,:,:]
+            eratciw     = data.variables['tciw'][:,0,:,:]
+            erau10wind  = data.variables['u10'][:,0,:,:]
+            erav10wind  = data.variables['v10'][:,0,:,:]
+        else:
+            eratemp     = data.variables['t2m'][:,:,:]
+            eraskintemp = data.variables['skt'][:,:,:]
+            eratcwv     = data.variables['tcwv'][:,:,:]
+            eratclw     = data.variables['tclw'][:,:,:]
+            eratciw     = data.variables['tciw'][:,:,:]
+            erau10wind  = data.variables['u10'][:,:,:]
+            erav10wind  = data.variables['v10'][:,:,:]
 
     # Define EASE-Grid 2.0 North projection
     if hemis == 'N':
@@ -941,10 +992,10 @@ def read_ASCAT_day_to_EASE2(DATE, hemis, target_res=25000):
     # Get filename
     path_base = Path("/mnt/raid01/Scatterometers/ASCAT/nrt_products") / f"{DATE[:4]}/"
     if hemis == 'N':
-        pattern = f"ASCAT_NRT_{DATE}_N*.nc"
+        pattern = f"ASCAT_NRT_{DATE}_N_001.nc"
         extent = 3000000
     elif hemis == 'S':
-        pattern = f"ASCAT_NRT_{DATE}_S*.nc"
+        pattern = f"ASCAT_NRT_{DATE}_S_001.nc"
         extent = 4200000
     
     files = natsort.natsorted(glob.glob(str(path_base / pattern)))
