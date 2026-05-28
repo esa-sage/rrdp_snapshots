@@ -53,7 +53,7 @@ def main():
         print("All checks passed. Script is ready to proceed.")
 
     # Go through each input RRDP file, load it, apply the algos, write the modified version in output_dir
-    for rrdp_file_in in tqdm(rrdp_files, desc='Adding OSISAF_sic to RRDP'):
+    for rrdp_file_in in tqdm(rrdp_files[:], desc='Adding OSISAF_sic to RRDP'):
 
         if args.verbose:
             print(f"Process '{rrdp_file_in}'.")
@@ -74,7 +74,17 @@ def main():
         if v_n not in ds.variables:
             if args.verbose:
                 print(f'##### adding OSISAF_sic to file')
-            sic, sic_url, sic_source = osi_sic.remap_sic(dt, hemis.lower()+'h', trg_adef)
+            try:
+                sic, sic_url, sic_source = osi_sic.remap_sic(dt, hemis.lower()+'h', trg_adef)
+            except Exception as e:
+                print(f"Error occurred while remapping SIC for file '{rrdp_file_in}': {e}")
+                print(f"Adding NaN-filled array for OSISAF_sic")
+                # Create NaN-filled array with the correct shape
+                shape = (len(ds.xc), len(ds.yc))
+                sic = np.full(shape, np.nan, dtype=np.float32)
+                sic_url = 'N/A'
+                sic_source = 'Data not available'
+            
             v_da = xr.DataArray(sic[None,:].astype(np.float32), dims=('time', 'xc', 'yc'), name=v_n,
                     attrs={
                     'standard_name': 'sea_ice_area_fraction', 'cell_methods': 'area:mean where sea',
@@ -83,8 +93,9 @@ def main():
                     'osisaf_file': sic_url,
                     'grid_mapping': 'crs'})
             ds[v_n] = v_da
-        elif args.verbose:
-            print(f"Variable '{v_n}' already exists in file '{rrdp_file_in}', skipping addition.")
+        else:
+            if args.verbose:
+                print(f"Variable '{v_n}' already exists in file '{rrdp_file_in}', skipping addition.")
             continue
 
         # Determine output file path
